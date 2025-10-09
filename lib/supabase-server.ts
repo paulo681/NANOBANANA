@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-type Database = {
+export type Database = {
   public: {
     Tables: {
       projects: {
@@ -11,6 +11,7 @@ type Database = {
           output_image_url: string | null;
           prompt: string;
           status: string;
+          user_id: string;
         };
         Insert: {
           id?: string;
@@ -19,6 +20,7 @@ type Database = {
           output_image_url?: string | null;
           prompt?: string;
           status?: string;
+          user_id?: string;
         };
         Update: {
           id?: string;
@@ -27,6 +29,7 @@ type Database = {
           output_image_url?: string | null;
           prompt?: string;
           status?: string;
+          user_id?: string;
         };
         Relationships: [];
       };

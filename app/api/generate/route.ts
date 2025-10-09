@@ -1,5 +1,8 @@
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+
+import { getSupabaseAdmin, type Database } from '@/lib/supabase-server';
 import { getPublicUrl, uploadToBucket } from '@/lib/storage';
 import { runImageGeneration } from '@/lib/replicate';
 
@@ -11,6 +14,15 @@ const OUTPUT_BUCKET = process.env.SUPABASE_OUTPUT_BUCKET ?? 'output-images';
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = createRouteHandlerClient<Database>({ cookies });
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const file = formData.get('image');
     const prompt = (formData.get('prompt') ?? '') as string;
@@ -53,19 +65,27 @@ export async function POST(request: NextRequest) {
     await uploadToBucket(OUTPUT_BUCKET, outputPath, generatedBuffer, generatedContentType);
     const outputPublicUrl = await getPublicUrl(OUTPUT_BUCKET, outputPath);
 
-    const supabase = getSupabaseAdmin();
-    const { error: insertError } = await supabase.from('projects').insert({
+    const newProject: Database['public']['Tables']['projects']['Insert'] = {
+      user_id: session.user.id,
       input_image_url: inputPublicUrl,
       output_image_url: outputPublicUrl,
       prompt,
       status: 'completed',
-    });
+    };
+
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data: project, error: insertError } = await supabaseAdmin
+      .from('projects')
+      .insert(newProject)
+      .select('*')
+      .single();
 
     if (insertError) {
-      console.error(insertError);
+      throw insertError;
     }
 
-    return NextResponse.json({ url: outputPublicUrl });
+    return NextResponse.json({ project });
   } catch (error) {
     console.error(error);
 

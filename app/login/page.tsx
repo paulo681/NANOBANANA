@@ -1,0 +1,22 @@
+import type { Metadata } from 'next';
+
+import { AuthForm } from '@/components/AuthForm';
+
+export const metadata: Metadata = {
+  title: 'Connexion – NanoBanana',
+};
+
+export default function LoginPage() {
+  return (
+    <section className="mx-auto mt-10 max-w-2xl space-y-8 text-center">
+      <div className="space-y-4">
+        <h1 className="text-3xl font-semibold text-white">Content de te revoir</h1>
+        <p className="text-sm text-slate-300">
+          Connecte-toi pour retrouver tes projets générés et en créer de nouveaux.
+        </p>
+      </div>
+      <AuthForm defaultMode="login" />
+    </section>
+  );
+}
+

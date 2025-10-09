@@ -57,3 +57,33 @@ export async function getPublicUrl(bucket: string, path: string): Promise<string
   }
   return data.publicUrl;
 }
+
+export async function deleteFromBucket(bucket: string, path: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  await ensureBucketExists(bucket);
+
+  const { error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) {
+    throw new Error(`Failed to delete file from ${bucket}: ${error.message}`);
+  }
+}
+
+export function resolvePathFromPublicUrl(bucket: string, publicUrl: string | null | undefined): string | null {
+  if (!publicUrl) return null;
+
+  try {
+    const url = new URL(publicUrl);
+    const segments = url.pathname.split('/');
+    const bucketIndex = segments.findIndex((segment) => segment === bucket);
+
+    if (bucketIndex === -1) {
+      return null;
+    }
+
+    const path = segments.slice(bucketIndex + 1).join('/');
+    return decodeURIComponent(path);
+  } catch (error) {
+    console.error('Failed to resolve storage path from URL', error);
+    return null;
+  }
+}
