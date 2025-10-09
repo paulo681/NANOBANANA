@@ -1,6 +1,42 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-type Database = Record<string, never>;
+type Database = {
+  public: {
+    Tables: {
+      projects: {
+        Row: {
+          id: string;
+          created_at: string;
+          input_image_url: string | null;
+          output_image_url: string | null;
+          prompt: string;
+          status: string;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          input_image_url?: string | null;
+          output_image_url?: string | null;
+          prompt?: string;
+          status?: string;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          input_image_url?: string | null;
+          output_image_url?: string | null;
+          prompt?: string;
+          status?: string;
+        };
+        Relationships: [];
+      };
+    };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
+  };
+};
 
 let supabaseAdmin: SupabaseClient<Database> | null = null;
 
