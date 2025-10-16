@@ -16,6 +16,7 @@ export type Database = {
           payment_amount: number | null;
           stripe_payment_intent_id: string | null;
           stripe_checkout_session_id: string | null;
+          model_key: string | null;
         };
         Insert: {
           id?: string;
@@ -29,6 +30,7 @@ export type Database = {
           payment_amount?: number | null;
           stripe_payment_intent_id?: string | null;
           stripe_checkout_session_id?: string | null;
+          model_key?: string | null;
         };
         Update: {
           id?: string;
@@ -42,8 +44,65 @@ export type Database = {
           payment_amount?: number | null;
           stripe_payment_intent_id?: string | null;
           stripe_checkout_session_id?: string | null;
+          model_key?: string | null;
         };
         Relationships: [];
+      };
+      credits: {
+        Row: {
+          user_id: string;
+          credits_remaining: number;
+          updated_at: string | null;
+          created_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          credits_remaining?: number;
+          updated_at?: string | null;
+          created_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          credits_remaining?: number;
+          updated_at?: string | null;
+          created_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'credits_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      billing_profiles: {
+        Row: {
+          user_id: string;
+          stripe_customer_id: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          user_id: string;
+          stripe_customer_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          user_id?: string;
+          stripe_customer_id?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'billing_profiles_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+        ];
       };
     };
     Views: Record<string, never>;

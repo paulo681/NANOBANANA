@@ -4,8 +4,69 @@ import type { Metadata } from 'next';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 
 import { DashboardClient } from '@/components/DashboardClient';
+import { ensureCreditsRow, getCreditsBalance } from '@/lib/billing';
 import { getSupabaseAdmin, type Database } from '@/lib/supabase-server';
 import { stripe } from '@/lib/stripe';
+import Stripe from 'stripe';
+
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? '')
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
+type AdminAnalytics = {
+  revenueEuros: number;
+  paymentsCount: number;
+  activeSubscriptions: number;
+  conversionRate: number;
+};
+
+async function fetchAdminAnalytics(): Promise<AdminAnalytics> {
+  const now = new Date();
+  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
+  const createdFilter = { gte: Math.floor(startOfMonth.getTime() / 1000) } as const;
+
+  const balanceTransactions: Stripe.BalanceTransaction[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const response = await stripe.balanceTransactions.list({
+      limit: 100,
+      created: createdFilter,
+      type: 'charge',
+      starting_after: startingAfter,
+    });
+
+    balanceTransactions.push(...response.data);
+
+    if (!response.has_more) {
+      break;
+    }
+
+    startingAfter = response.data.at(-1)?.id;
+    if (!startingAfter) {
+      break;
+    }
+  }
+
+  const totalRevenueCents = balanceTransactions.reduce((acc, tx) => acc + tx.amount, 0);
+  const paymentsCount = balanceTransactions.length;
+
+  const subscriptions = await stripe.subscriptions.list({ status: 'active', limit: 100 });
+  const activeSubscriptions = subscriptions.data.length;
+
+  const sessions = await stripe.checkout.sessions.list({ limit: 100, created: createdFilter });
+  const totalSessions = sessions.data.length;
+  const paidSessions = sessions.data.filter((session) => session.payment_status === 'paid').length;
+  const conversionRate = totalSessions > 0 ? paidSessions / totalSessions : 0;
+
+  return {
+    revenueEuros: totalRevenueCents / 100,
+    paymentsCount,
+    activeSubscriptions,
+    conversionRate,
+  };
+}
 
 export const metadata: Metadata = {
   title: 'Tableau de bord – NanoBanana',
@@ -69,13 +130,47 @@ export default async function DashboardPage({
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false });
 
-  const generationPriceCents = 200;
+  await ensureCreditsRow(session.user.id);
+  const creditsBalance = await getCreditsBalance(session.user.id);
+
+  const isAdmin = ADMIN_EMAILS.includes((session.user.email ?? '').toLowerCase());
+  const adminAnalytics = isAdmin ? await fetchAdminAnalytics() : null;
 
   return (
-    <DashboardClient
-      initialProjects={projects ?? []}
-      generationPriceCents={generationPriceCents}
-      hadCheckoutSession={Boolean(checkoutSessionId)}
-    />
+    <>
+      <DashboardClient
+        initialProjects={projects ?? []}
+        hadCheckoutSession={Boolean(checkoutSessionId)}
+        initialCredits={creditsBalance}
+      />
+
+      {isAdmin && adminAnalytics && (
+        <section className="mt-12 space-y-4 rounded-3xl border border-white/5 bg-slate-900/50 p-8">
+          <h2 className="text-2xl font-semibold text-white">Analytics du mois</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-white/5 bg-slate-950/50 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Revenu</p>
+              <p className="mt-2 text-xl font-semibold text-white">
+                {adminAnalytics.revenueEuros.toFixed(2)} €
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-slate-950/50 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Paiements</p>
+              <p className="mt-2 text-xl font-semibold text-white">{adminAnalytics.paymentsCount}</p>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-slate-950/50 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Abonnements actifs</p>
+              <p className="mt-2 text-xl font-semibold text-white">{adminAnalytics.activeSubscriptions}</p>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-slate-950/50 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Conversion</p>
+              <p className="mt-2 text-xl font-semibold text-white">
+                {(adminAnalytics.conversionRate * 100).toFixed(1)}%
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+    </>
   );
 }

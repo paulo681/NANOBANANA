@@ -34,6 +34,11 @@ export function AppHeader() {
         <Link href="/dashboard" className="hover:text-white">
           Tableau de bord
         </Link>
+        {user && (
+          <Link href="/billing" className="hover:text-white">
+            Facturation
+          </Link>
+        )}
         {loading ? (
           <span className="text-xs text-slate-400">Chargement…</span>
         ) : user ? (

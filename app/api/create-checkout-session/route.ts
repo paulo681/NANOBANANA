@@ -4,13 +4,14 @@ import { NextResponse } from 'next/server';
 
 import { getSupabaseAdmin, type Database } from '@/lib/supabase-server';
 import { getPublicUrl, uploadToBucket } from '@/lib/storage';
+import { ensureBillingProfile, ensureCreditsRow } from '@/lib/billing';
+import { MODEL_PRICING, type ModelKey } from '@/lib/pricing';
 import { stripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const INPUT_BUCKET = process.env.SUPABASE_INPUT_BUCKET ?? 'input-images';
-const GENERATION_PRICE_CENTS = 200;
 
 export async function POST(request: Request) {
   try {
@@ -26,6 +27,13 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get('image');
     const prompt = (formData.get('prompt') ?? '') as string;
+    const modelKey = (formData.get('modelKey') ?? 'google/nano-banana') as string;
+
+    if (!(modelKey in MODEL_PRICING)) {
+      return NextResponse.json({ error: 'Modèle non supporté.' }, { status: 400 });
+    }
+
+    const { amountCents } = MODEL_PRICING[modelKey as ModelKey];
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'Aucune image reçue.' }, { status: 400 });
@@ -45,6 +53,14 @@ export async function POST(request: Request) {
 
     const supabaseAdmin = getSupabaseAdmin();
 
+    await ensureCreditsRow(session.user.id);
+
+    const stripeCustomerId = await ensureBillingProfile({
+      supabase,
+      userId: session.user.id,
+      email: session.user.email ?? '',
+    });
+
     const { data: project, error: insertError } = await supabaseAdmin
       .from('projects')
       .insert({
@@ -52,8 +68,9 @@ export async function POST(request: Request) {
         input_image_url: inputPublicUrl,
         status: 'pending',
         payment_status: 'pending',
-        payment_amount: GENERATION_PRICE_CENTS / 100,
+        payment_amount: amountCents / 100,
         prompt,
+        model_key: modelKey,
       })
       .select('*')
       .single();
@@ -70,19 +87,22 @@ export async function POST(request: Request) {
 
     const sessionCheckout = await stripe.checkout.sessions.create({
       mode: 'payment',
+      customer: stripeCustomerId,
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: {
         project_id: createdProject.id,
+        model_key: modelKey,
+        price_cents: String(amountCents),
       },
       line_items: [
         {
           quantity: 1,
           price_data: {
             currency: 'eur',
-            unit_amount: GENERATION_PRICE_CENTS,
+            unit_amount: amountCents,
             product_data: {
-              name: "Génération d'image IA",
+              name: `Génération IA – ${modelKey}`,
             },
           },
         },

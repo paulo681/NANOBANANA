@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
       imageBase64: base64Image,
       prompt: projectRow.prompt,
       fallbackImageUrl: projectRow.input_image_url,
+      model: projectRow.model_key ?? undefined,
     });
 
     const generatedResponse = await fetch(outputImageUrl);
