@@ -23,32 +23,60 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get('image');
-    const prompt = (formData.get('prompt') ?? '') as string;
+    const body = await request.json().catch(() => null);
+    const projectId = body?.projectId as string | undefined;
 
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'Aucune image reçue.' }, { status: 400 });
+    if (!projectId) {
+      return NextResponse.json({ error: 'projectId est requis.' }, { status: 400 });
     }
 
-    if (!prompt.trim()) {
-      return NextResponse.json({ error: 'Le prompt est requis.' }, { status: 400 });
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data: project, error: fetchError } = await supabaseAdmin
+      .from('projects')
+      .select('*')
+      .eq('id', projectId)
+      .single();
+
+    const projectRow = project as Database['public']['Tables']['projects']['Row'] | null;
+
+    if (fetchError || !projectRow) {
+      return NextResponse.json({ error: 'Projet introuvable.' }, { status: 404 });
     }
 
-    const fileArrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(fileArrayBuffer);
-    const extension = file.type?.split('/')?.[1] || 'png';
-    const inputPath = `uploads/${new Date().toISOString()}-${crypto.randomUUID()}.${extension}`;
+    if (projectRow.user_id !== session.user.id) {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    }
 
-    await uploadToBucket(INPUT_BUCKET, inputPath, fileBuffer, file.type || 'application/octet-stream');
-    const inputPublicUrl = await getPublicUrl(INPUT_BUCKET, inputPath);
+    if (projectRow.payment_status !== 'paid') {
+      return NextResponse.json({ error: 'Le paiement est requis avant de lancer la génération.' }, { status: 402 });
+    }
 
-    const base64Image = `data:${file.type || 'image/png'};base64,${fileBuffer.toString('base64')}`;
+    if (!projectRow.input_image_url) {
+      return NextResponse.json({ error: "L'image source est introuvable." }, { status: 400 });
+    }
+
+    await supabaseAdmin
+      .from('projects')
+      .update({ status: 'processing' })
+      .eq('id', projectId)
+      .eq('user_id', session.user.id);
+
+    const inputResponse = await fetch(projectRow.input_image_url);
+    if (!inputResponse.ok) {
+      throw new Error("Impossible de télécharger l'image source.");
+    }
+
+    const inputArrayBuffer = await inputResponse.arrayBuffer();
+    const inputBuffer = Buffer.from(inputArrayBuffer);
+    const contentType = inputResponse.headers.get('content-type') ?? 'image/png';
+
+    const base64Image = `data:${contentType};base64,${inputBuffer.toString('base64')}`;
 
     const outputImageUrl = await runImageGeneration({
       imageBase64: base64Image,
-      prompt,
-      fallbackImageUrl: inputPublicUrl,
+      prompt: projectRow.prompt,
+      fallbackImageUrl: projectRow.input_image_url,
     });
 
     const generatedResponse = await fetch(outputImageUrl);
@@ -65,27 +93,22 @@ export async function POST(request: NextRequest) {
     await uploadToBucket(OUTPUT_BUCKET, outputPath, generatedBuffer, generatedContentType);
     const outputPublicUrl = await getPublicUrl(OUTPUT_BUCKET, outputPath);
 
-    const newProject: Database['public']['Tables']['projects']['Insert'] = {
-      user_id: session.user.id,
-      input_image_url: inputPublicUrl,
-      output_image_url: outputPublicUrl,
-      prompt,
-      status: 'completed',
-    };
-
-    const supabaseAdmin = getSupabaseAdmin();
-
-    const { data: project, error: insertError } = await supabaseAdmin
+    const { data: updatedProject, error: updateError } = await supabaseAdmin
       .from('projects')
-      .insert(newProject)
+      .update({
+        output_image_url: outputPublicUrl,
+        status: 'completed',
+      })
+      .eq('id', projectId)
+      .eq('user_id', session.user.id)
       .select('*')
       .single();
 
-    if (insertError) {
-      throw insertError;
+    if (updateError || !updatedProject) {
+      throw updateError ?? new Error('Erreur lors de la mise à jour du projet.');
     }
 
-    return NextResponse.json({ project });
+    return NextResponse.json({ project: updatedProject });
   } catch (error) {
     console.error(error);
 

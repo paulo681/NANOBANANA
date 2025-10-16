@@ -8,19 +8,28 @@ type Project = Database['public']['Tables']['projects']['Row'];
 
 type DashboardClientProps = {
   initialProjects: Project[];
+  stripePublishableKey: string;
+  generationPriceCents: number;
 };
 
-export function DashboardClient({ initialProjects }: DashboardClientProps) {
+export function DashboardClient({ initialProjects, stripePublishableKey, generationPriceCents }: DashboardClientProps) {
   const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [generatingProjectId, setGeneratingProjectId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setProjects(initialProjects);
   }, [initialProjects]);
+
+  useEffect(() => {
+    if (!stripePublishableKey) {
+      console.error('La clé Stripe publishable est manquante. Vérifie NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.');
+    }
+  }, [stripePublishableKey]);
 
   const previewUrl = useMemo(() => {
     if (!file) return null;
@@ -35,7 +44,7 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
     setStatus('idle');
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateCheckoutSession = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!file || !prompt.trim()) {
@@ -44,14 +53,14 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
     }
 
     const formData = new FormData();
-    formData.append('image', file);
     formData.append('prompt', prompt);
+    formData.append('image', file);
 
     setStatus('loading');
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/generate', {
+      const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
         body: formData,
       });
@@ -62,20 +71,50 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
           return;
         }
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error ?? 'Impossible de générer cette image.');
+        throw new Error(payload.error ?? 'Impossible de créer la session de paiement.');
       }
 
-      const payload = (await response.json()) as { project: Project };
-      setProjects((current) => [payload.project, ...current]);
-      setFile(null);
-      setPrompt('');
-      setStatus('success');
-      if (inputRef.current) {
-        inputRef.current.value = '';
+      const payload = (await response.json()) as { url: string };
+
+      if (!payload.url) {
+        throw new Error('URL de redirection Stripe manquante.');
       }
+
+      window.location.href = payload.url;
     } catch (error) {
       setStatus('error');
       setErrorMessage(error instanceof Error ? error.message : 'Erreur inattendue. Réessaie.');
+    }
+  };
+
+  const handleLaunchGeneration = async (projectId: string) => {
+    setGeneratingProjectId(projectId);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ projectId }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error ?? 'Impossible de lancer la génération.');
+      }
+
+      const payload = (await response.json()) as { project: Project };
+      setProjects((current) => current.map((project) => (project.id === projectId ? payload.project : project)));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Erreur inattendue. Réessaie.');
+    } finally {
+      setGeneratingProjectId(null);
     }
   };
 
@@ -110,7 +149,7 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
         </header>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={handleCreateCheckoutSession}
           className="space-y-6 rounded-3xl border border-white/5 bg-slate-900/50 p-8 shadow-soft backdrop-blur"
         >
           <div className="space-y-3">
@@ -177,7 +216,9 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
             disabled={status === 'loading'}
             className="w-full rounded-2xl bg-gradient-to-r from-primary to-accent px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-indigo-500/30 transition hover:shadow-indigo-400/50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === 'loading' ? 'Génération en cours…' : 'Générer'}
+            {status === 'loading'
+              ? 'Redirection vers Stripe…'
+              : `Générer (${(generationPriceCents / 100).toFixed(2)}€)`}
           </button>
         </form>
       </section>
@@ -201,6 +242,11 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
                   <p className="text-sm text-slate-200">{project.prompt}</p>
                 </div>
 
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>Statut&nbsp;: {project.status}</span>
+                  <span>Paiement&nbsp;: {project.payment_status ?? 'inconnu'}</span>
+                </div>
+
                 <div className="space-y-2">
                   <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Résultat</p>
                   <img
@@ -212,13 +258,25 @@ export function DashboardClient({ initialProjects }: DashboardClientProps) {
 
                 <div className="flex items-center justify-between text-xs text-slate-400">
                   <span>{new Date(project.created_at).toLocaleString()}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(project.id)}
-                    className="text-rose-300 underline-offset-4 hover:underline"
-                  >
-                    Supprimer
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {project.payment_status === 'paid' && project.status !== 'completed' && (
+                      <button
+                        type="button"
+                        onClick={() => handleLaunchGeneration(project.id)}
+                        disabled={generatingProjectId === project.id}
+                        className="rounded-full bg-accent px-3 py-1 text-[11px] font-semibold text-slate-900 shadow transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {generatingProjectId === project.id ? 'Génération…' : 'Lancer la génération'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(project.id)}
+                      className="text-rose-300 underline-offset-4 hover:underline"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}

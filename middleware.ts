@@ -14,7 +14,8 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isProtectedPage = pathname.startsWith('/dashboard');
-  const isProtectedApi = pathname.startsWith('/api');
+  const isStripeWebhook = pathname === '/api/webhooks/stripe';
+  const isProtectedApi = pathname.startsWith('/api') && !isStripeWebhook;
 
   if (!session && (isProtectedPage || isProtectedApi)) {
     if (isProtectedApi) {
@@ -33,4 +34,3 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: ['/dashboard/:path*', '/api/:path*'],
 };
-

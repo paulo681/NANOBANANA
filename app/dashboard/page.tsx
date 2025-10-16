@@ -29,6 +29,14 @@ export default async function DashboardPage() {
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false });
 
-  return <DashboardClient initialProjects={projects ?? []} />;
-}
+  const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
+  const generationPriceCents = 200;
 
+  return (
+    <DashboardClient
+      initialProjects={projects ?? []}
+      stripePublishableKey={stripePublishableKey}
+      generationPriceCents={generationPriceCents}
+    />
+  );
+}
