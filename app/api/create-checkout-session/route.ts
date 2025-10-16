@@ -64,8 +64,9 @@ export async function POST(request: Request) {
       throw insertError ?? new Error('Impossible de créer le projet.');
     }
 
-    const successUrl = process.env.NEXT_PUBLIC_URL ? `${process.env.NEXT_PUBLIC_URL}/dashboard` : `${request.headers.get('origin')}/dashboard`;
-    const cancelUrl = successUrl;
+    const baseUrl = process.env.NEXT_PUBLIC_URL ?? request.headers.get('origin') ?? '';
+    const successUrl = `${baseUrl}/dashboard?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${baseUrl}/dashboard`;
 
     const sessionCheckout = await stripe.checkout.sessions.create({
       mode: 'payment',

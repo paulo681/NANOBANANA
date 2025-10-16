@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import type { Database } from '@/lib/supabase-server';
 
@@ -8,11 +9,11 @@ type Project = Database['public']['Tables']['projects']['Row'];
 
 type DashboardClientProps = {
   initialProjects: Project[];
-  stripePublishableKey: string;
   generationPriceCents: number;
+  hadCheckoutSession?: boolean;
 };
 
-export function DashboardClient({ initialProjects, stripePublishableKey, generationPriceCents }: DashboardClientProps) {
+export function DashboardClient({ initialProjects, generationPriceCents, hadCheckoutSession = false }: DashboardClientProps) {
   const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -20,16 +21,17 @@ export function DashboardClient({ initialProjects, stripePublishableKey, generat
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [generatingProjectId, setGeneratingProjectId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     setProjects(initialProjects);
   }, [initialProjects]);
 
   useEffect(() => {
-    if (!stripePublishableKey) {
-      console.error('La clé Stripe publishable est manquante. Vérifie NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.');
+    if (hadCheckoutSession) {
+      router.replace('/dashboard');
     }
-  }, [stripePublishableKey]);
+  }, [hadCheckoutSession, router]);
 
   const previewUrl = useMemo(() => {
     if (!file) return null;
